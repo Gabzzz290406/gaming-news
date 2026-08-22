@@ -67,6 +67,24 @@ function renderGame(game) {
   return card;
 }
 
+function renderSpinner() {
+  return `
+    <div class="loading-state">
+      <span class="spinner"></span>
+      <span>Recherche en cours…</span>
+    </div>
+  `;
+}
+
+function createBackgroundBlobs() {
+  const blob1 = document.createElement("div");
+  blob1.className = "bg-blob bg-blob-1";
+  const blob2 = document.createElement("div");
+  blob2.className = "bg-blob bg-blob-2";
+  document.body.prepend(blob2);
+  document.body.prepend(blob1);
+}
+
 async function searchSteam(term) {
   const url = `${STEAM_SEARCH_URL}?term=${encodeURIComponent(term)}&cc=fr&l=french`;
   const res = await fetch(CORS_PROXY + encodeURIComponent(url));
@@ -86,7 +104,7 @@ async function runSearch() {
   }
 
   const seq = ++requestSeq;
-  statusEl.textContent = "Recherche en cours…";
+  statusEl.innerHTML = renderSpinner();
   statusEl.classList.remove("error");
 
   try {
@@ -100,7 +118,11 @@ async function runSearch() {
 
     statusEl.textContent = "";
     const fragment = document.createDocumentFragment();
-    items.slice(0, 10).forEach((game) => fragment.appendChild(renderGame(game)));
+    items.slice(0, 10).forEach((game, i) => {
+      const card = renderGame(game);
+      card.style.animationDelay = `${i * 60}ms`;
+      fragment.appendChild(card);
+    });
     gridEl.appendChild(fragment);
   } catch (err) {
     if (seq !== requestSeq) return;
@@ -114,4 +136,5 @@ searchInput.addEventListener("input", () => {
   debounceTimer = setTimeout(runSearch, DEBOUNCE_MS);
 });
 
+createBackgroundBlobs();
 statusEl.textContent = "Tape le nom d'un jeu pour comparer les prix.";
