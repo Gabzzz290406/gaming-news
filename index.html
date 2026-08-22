@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PixelWire — Actu Jeux Vidéo</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-mark">▍▍</span>
+        <span class="logo-text">Pixel<strong>Wire</strong></span>
+      </div>
+      <div class="search-box">
+        <svg class="search-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="7"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" id="searchInput" placeholder="Rechercher un jeu, un studio, une actu…" autocomplete="off">
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="toolbar">
+      <div class="filters" id="filters">
+        <button class="filter-chip active" data-filter="all">Tout</button>
+        <button class="filter-chip" data-filter="leak">Leaks</button>
+        <button class="filter-chip" data-filter="exclusive">Exclusivités</button>
+        <button class="filter-chip" data-filter="release">Sorties</button>
+      </div>
+      <span class="result-count" id="resultCount"></span>
+    </div>
+
+    <div id="status" class="status"></div>
+    <div id="articleGrid" class="article-grid"></div>
+  </main>
+
+  <footer class="site-footer">
+    <p>PixelWire agrège des flux RSS publics (IGN, Eurogamer, PC Gamer, Kotaku). Projet de démo — pas d'affiliation.</p>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
