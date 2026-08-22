@@ -1,174 +1,117 @@
-const FEEDS = [
-  { name: "IGN", url: "https://feeds.ign.com/ign/games-all" },
-  { name: "Eurogamer", url: "https://www.eurogamer.net/feed" },
-  { name: "PC Gamer", url: "https://www.pcgamer.com/rss/" },
-  { name: "Kotaku", url: "https://kotaku.com/rss" },
-];
-
-const RSS2JSON_ENDPOINT = "https://api.rss2json.com/v1/api.json";
+const CORS_PROXY = "https://corsproxy.io/?url=";
+const STEAM_SEARCH_URL = "https://store.steampowered.com/api/storesearch/";
+const DEBOUNCE_MS = 400;
 
 const statusEl = document.getElementById("status");
-const gridEl = document.getElementById("articleGrid");
+const gridEl = document.getElementById("resultGrid");
 const searchInput = document.getElementById("searchInput");
-const resultCountEl = document.getElementById("resultCount");
-const filterButtons = document.querySelectorAll(".filter-chip");
 
-let allArticles = [];
-let activeFilter = "all";
+let debounceTimer = null;
+let requestSeq = 0;
 
-function tagFor(article) {
-  const text = (article.title + " " + article.description).toLowerCase();
-  if (/\bleak(ed|s)?\b|\brumo(u)?r/.test(text)) return "leak";
-  if (/\bexclusiv/.test(text)) return "exclusive";
-  if (/\brelease(d|s)?\b|\bout now\b|\blaunch/.test(text)) return "release";
-  return "news";
+function formatPrice(cents, currency) {
+  if (cents === 0) return "Gratuit";
+  const amount = (cents / 100).toFixed(2).replace(".", ",");
+  return `${amount} ${currency === "EUR" ? "€" : currency}`;
 }
 
-function stripHtml(html) {
-  const div = document.createElement("div");
-  div.innerHTML = html || "";
-  return div.textContent || div.innerText || "";
+function epicSearchUrl(name) {
+  return `https://store.epicgames.com/fr/browse?q=${encodeURIComponent(name)}&sortBy=relevancy&sortDir=DESC`;
 }
 
-function extractThumb(item) {
-  if (item.thumbnail) return item.thumbnail;
-  if (item.enclosure && item.enclosure.link) return item.enclosure.link;
-  const match = /<img[^>]+src="([^">]+)"/.exec(item.description || item.content || "");
-  return match ? match[1] : null;
+function instantGamingUrl(name) {
+  const base = `https://www.instant-gaming.com/en/search/?q=${encodeURIComponent(name)}`;
+  const ref = AFFILIATE_CONFIG.instantGamingRef;
+  return ref && ref !== "TON_CODE_INSTANT_GAMING" ? `${base}&igr=${encodeURIComponent(ref)}` : base;
 }
 
-async function loadFeed(feed) {
-  const url = `${RSS2JSON_ENDPOINT}?rss_url=${encodeURIComponent(feed.url)}`;
-  const res = await fetch(url);
+function renderGame(game) {
+  const card = document.createElement("div");
+  card.className = "game-card";
+
+  const thumbHtml = game.tiny_image
+    ? `<img class="game-thumb" src="${game.tiny_image}" alt="" loading="lazy">`
+    : `<div class="game-thumb"></div>`;
+
+  const hasDiscount = game.price && game.price.initial !== game.price.final;
+  const steamPriceHtml = game.price
+    ? `<span class="store-price ${game.price.final === 0 ? "free" : ""}">${formatPrice(game.price.final, game.price.currency)}</span>
+       ${hasDiscount ? `<span class="discount-badge">-${Math.round((1 - game.price.final / game.price.initial) * 100)}%</span>` : ""}`
+    : `<span class="store-price">Voir le prix</span>`;
+
+  const epicCode = AFFILIATE_CONFIG.epicCreatorCode;
+  const epicNote =
+    epicCode && epicCode !== "TON_CODE_EPIC"
+      ? `<div class="epic-note">Sur Epic, pense à entrer le code créateur <strong>${epicCode}</strong> au moment de payer.</div>`
+      : "";
+
+  card.innerHTML = `
+    ${thumbHtml}
+    <div class="game-info">
+      <h3 class="game-title">${game.name}</h3>
+      <div class="game-meta">${game.platforms && game.platforms.windows ? "Windows" : ""}</div>
+      <div class="store-list">
+        <a class="store-link steam" href="https://store.steampowered.com/app/${game.id}" target="_blank" rel="noopener noreferrer nofollow">
+          Steam · ${steamPriceHtml}
+        </a>
+        <a class="store-link epic" href="${epicSearchUrl(game.name)}" target="_blank" rel="noopener noreferrer nofollow">
+          Voir sur Epic Games Store
+        </a>
+        <a class="store-link instant" href="${instantGamingUrl(game.name)}" target="_blank" rel="noopener noreferrer nofollow">
+          Voir sur Instant Gaming
+        </a>
+        ${epicNote}
+      </div>
+    </div>
+  `;
+  return card;
+}
+
+async function searchSteam(term) {
+  const url = `${STEAM_SEARCH_URL}?term=${encodeURIComponent(term)}&cc=fr&l=french`;
+  const res = await fetch(CORS_PROXY + encodeURIComponent(url));
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
-  if (data.status !== "ok") throw new Error(data.message || "flux indisponible");
-
-  return data.items.slice(0, 15).map((item) => {
-    const description = stripHtml(item.description).slice(0, 220).trim();
-    const article = {
-      title: item.title,
-      link: item.link,
-      source: feed.name,
-      pubDate: item.pubDate ? new Date(item.pubDate) : new Date(0),
-      description,
-      thumb: extractThumb(item),
-    };
-    article.tag = tagFor(article);
-    return article;
-  });
+  return data.items || [];
 }
 
-function formatDate(date) {
-  if (!date || isNaN(date.getTime())) return "";
-  return date.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
-}
-
-function normalize(str) {
-  return str
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "");
-}
-
-function renderArticles() {
-  const query = normalize(searchInput.value.trim());
-
-  const filtered = allArticles.filter((a) => {
-    const matchesFilter = activeFilter === "all" || a.tag === activeFilter;
-    const matchesQuery =
-      !query ||
-      normalize(a.title).includes(query) ||
-      normalize(a.description).includes(query) ||
-      normalize(a.source).includes(query);
-    return matchesFilter && matchesQuery;
-  });
-
-  resultCountEl.textContent = filtered.length
-    ? `${filtered.length} article${filtered.length > 1 ? "s" : ""}`
-    : "";
-
+async function runSearch() {
+  const term = searchInput.value.trim();
   gridEl.innerHTML = "";
 
-  if (filtered.length === 0) {
-    statusEl.textContent = allArticles.length
-      ? "Aucun article ne correspond à ta recherche."
-      : "";
+  if (!term) {
+    statusEl.textContent = "Tape le nom d'un jeu pour comparer les prix.";
     statusEl.classList.remove("error");
     return;
   }
-  statusEl.textContent = "";
 
-  const fragment = document.createDocumentFragment();
-  for (const article of filtered) {
-    const card = document.createElement("a");
-    card.className = "article-card";
-    card.href = article.link;
-    card.target = "_blank";
-    card.rel = "noopener noreferrer";
+  const seq = ++requestSeq;
+  statusEl.textContent = "Recherche en cours…";
+  statusEl.classList.remove("error");
 
-    const thumbHtml = article.thumb
-      ? `<img class="article-thumb" src="${article.thumb}" alt="" loading="lazy" onerror="this.style.display='none'">`
-      : `<div class="article-thumb placeholder">Pas d'image</div>`;
+  try {
+    const items = await searchSteam(term);
+    if (seq !== requestSeq) return;
 
-    card.innerHTML = `
-      ${thumbHtml}
-      <div class="article-body">
-        <div class="article-meta">
-          <span class="tag ${article.tag}">${article.tag}</span>
-          <span class="source-badge">${article.source}</span>
-          <span>·</span>
-          <span>${formatDate(article.pubDate)}</span>
-        </div>
-        <h3 class="article-title">${article.title}</h3>
-        <p class="article-desc">${article.description}</p>
-      </div>
-    `;
-    fragment.appendChild(card);
-  }
-  gridEl.appendChild(fragment);
-}
-
-async function init() {
-  statusEl.textContent = "Chargement des actus…";
-
-  const results = await Promise.allSettled(FEEDS.map(loadFeed));
-
-  const failedFeeds = [];
-  results.forEach((result, i) => {
-    if (result.status === "fulfilled") {
-      allArticles.push(...result.value);
-    } else {
-      failedFeeds.push(FEEDS[i].name);
+    if (items.length === 0) {
+      statusEl.textContent = "Aucun jeu trouvé pour cette recherche.";
+      return;
     }
-  });
 
-  allArticles.sort((a, b) => b.pubDate - a.pubDate);
-
-  if (allArticles.length === 0) {
-    statusEl.textContent = "Impossible de charger les flux pour le moment. Réessaie plus tard.";
-    statusEl.classList.add("error");
-    return;
-  }
-
-  if (failedFeeds.length) {
-    statusEl.textContent = `Certaines sources n'ont pas répondu (${failedFeeds.join(", ")}).`;
-  } else {
     statusEl.textContent = "";
+    const fragment = document.createDocumentFragment();
+    items.slice(0, 10).forEach((game) => fragment.appendChild(renderGame(game)));
+    gridEl.appendChild(fragment);
+  } catch (err) {
+    if (seq !== requestSeq) return;
+    statusEl.textContent = "Impossible de récupérer les prix pour le moment. Réessaie plus tard.";
+    statusEl.classList.add("error");
   }
-
-  renderArticles();
 }
 
-searchInput.addEventListener("input", renderArticles);
-
-filterButtons.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    filterButtons.forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    activeFilter = btn.dataset.filter;
-    renderArticles();
-  });
+searchInput.addEventListener("input", () => {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(runSearch, DEBOUNCE_MS);
 });
 
-init();
+statusEl.textContent = "Tape le nom d'un jeu pour comparer les prix.";
